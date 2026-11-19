@@ -2,9 +2,9 @@ import { connection } from 'next/server';
 import Typography from '@mui/material/Typography';
 import FiltersBar from '@/components/FiltersBar';
 import SessionsGrid from '@/components/SessionsGrid';
-import type { SearchParams } from '@/lib/filters';
+import { pathWithFilters, type SearchParams } from '@/lib/filters';
 import { getFilterOptions, getSessions } from '@/lib/queries';
-import { getRequestFilters, getStore, getSyncStatus } from '@/lib/server';
+import { getRequestFilters, getStore } from '@/lib/server';
 
 export const metadata = { title: 'Sessions | muh-tokens' };
 
@@ -18,11 +18,12 @@ export default async function SessionsPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <FiltersBar filters={filters} projects={projects} models={models} sync={getSyncStatus()} />
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-        {sessions.length} sessions with calls in this range. Totals cover each whole session. Click a row for its timeline.
+      <FiltersBar filters={filters} projects={projects} models={models} />
+      <Typography variant="h1">Sessions</Typography>
+      <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
+        {sessions.length} sessions with calls in this range. Totals cover each whole session, including calls outside the range.
       </Typography>
-      <SessionsGrid rows={sessions} />
+      <SessionsGrid rows={sessions} back={pathWithFilters('/sessions', filters)} />
     </>
   );
 }

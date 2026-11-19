@@ -3,6 +3,9 @@ services:
     build: .
     image: muh-tokens
     restart: unless-stopped
+    environment:
+      # Server-rendered times must match the browser's timezone, or React reports a hydration mismatch.
+      TZ: ${TZ:-Australia/Hobart}
     ports:
       - "127.0.0.1:4817:4817"
     volumes:

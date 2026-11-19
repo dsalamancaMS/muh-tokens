@@ -2,9 +2,11 @@
 
 A local web app that shows GitHub Copilot CLI token and AI credit (AIC) usage over time. It reads the session store that Copilot CLI writes on your machine and nothing else.
 
-- The dashboard shows totals, a stacked timeline of AIC or tokens, the split by token type, the top sessions, and breakdowns by model, project and agent. The timeline can be stacked by token type, session, model, project or agent. Below it, a time chart shows the same series on a continuous time axis at a finer step, as lines, a stacked area or a running total. When either chart is stacked by session, clicking a series opens that session. A third chart always shows one line per project, for the 8 largest projects in the range plus Other, with its own AIC or tokens toggle and the same three views.
-- The sessions page lists every session in the selected range with its AIC, tokens, calls and per-type split.
-- The session page shows one session: a timeline of AIC or tokens by type with a running AIC total, the largest context per agent in each 5-minute period, the sub-agents, and the most expensive idle cache rewrites.
+- The Overview page shows four totals (AIC, idle rewrite cost, tokens, calls) and one usage chart. The chart shows AIC or tokens, grouped by token type, session, project, model or agent, as bars, lines, a stacked area or a running total. Bars use hour, day or week steps; the other views use a finer step unless you pick one. Click a legend item to hide that series. When the chart is grouped by session, clicking a series opens that session. Beside the chart, the top contributors for the current grouping link to the session or apply the project or model filter. Below it are the token and credit split by type, the idle cache rewrite summary, and a table of the top sessions, projects, models and agents.
+- The Sessions page lists every session in the selected range with its AIC, tokens, calls, rewrite cost and per-type split. More columns are available from the column menu.
+- The session page shows one session: a timeline of AIC or tokens by type with idle rewrite AIC and a running total, the token and credit split, the idle cache rewrites, the largest context per agent in each 5-minute period, and the sub-agents. The Back link returns to the page you came from with its filters.
+
+All filters live in the URL, so any view can be bookmarked or shared. The filter bar stays pinned under the top bar on wider screens.
 
 ## Running it
 
@@ -26,6 +28,8 @@ docker compose up -d --build    # http://localhost:4817
 ```
 
 Compose mounts `~/.copilot` read-only at `/copilot` and keeps the app's store in the `muh-tokens-data` volume. Set `COPILOT_DIR` to mount a different Copilot folder. The port is bound to 127.0.0.1 only.
+
+The container's `TZ` defaults to `Australia/Hobart`. Set `TZ` to your browser's timezone, or server-rendered times will not match the browser and React reports a hydration error.
 
 The mount must stay read-only. The Copilot database uses WAL mode, and SQLite's WAL index is shared memory, which is not kept consistent between the host and a container VM. A read-only mount stops the container from writing to it. `npm run sync` is not available in the image; use the Sync button or wait for the timer.
 

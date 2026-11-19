@@ -6,8 +6,8 @@ export const STACKS = ['type', 'session', 'model', 'agent', 'project'] as const;
 export type Stack = (typeof STACKS)[number];
 export const METRICS = ['aic', 'tokens'] as const;
 export type Metric = (typeof METRICS)[number];
-export const CHARTS = ['line', 'area', 'cumulative'] as const;
-export type Chart = (typeof CHARTS)[number];
+export const VIEWS = ['bars', 'lines', 'area', 'cumulative'] as const;
+export type View = (typeof VIEWS)[number];
 
 export interface Filters {
   preset: Preset;
@@ -21,9 +21,7 @@ export interface Filters {
   model: string | null;
   stack: Stack;
   metric: Metric;
-  chart: Chart;
-  projectMetric: Metric;
-  projectChart: Chart;
+  view: View;
 }
 
 export type SearchParams = Record<string, string | string[] | undefined>;
@@ -95,9 +93,7 @@ export function parseFilters(params: SearchParams, now: number, earliestMs: numb
     model: first(params.model) || null,
     stack: oneOf(first(params.stack), STACKS, 'type'),
     metric: oneOf(first(params.metric), METRICS, 'aic'),
-    chart: oneOf(first(params.chart), CHARTS, 'line'),
-    projectMetric: oneOf(first(params.pmetric), METRICS, 'aic'),
-    projectChart: oneOf(first(params.pchart), CHARTS, 'line'),
+    view: oneOf(first(params.view), VIEWS, 'bars'),
   };
 }
 
@@ -136,8 +132,22 @@ export function filtersToParams(filters: Partial<Filters>): URLSearchParams {
   if (filters.model) params.set('model', filters.model);
   if (filters.stack && filters.stack !== 'type') params.set('stack', filters.stack);
   if (filters.metric && filters.metric !== 'aic') params.set('metric', filters.metric);
-  if (filters.chart && filters.chart !== 'line') params.set('chart', filters.chart);
-  if (filters.projectMetric && filters.projectMetric !== 'aic') params.set('pmetric', filters.projectMetric);
-  if (filters.projectChart && filters.projectChart !== 'line') params.set('pchart', filters.projectChart);
+  if (filters.view && filters.view !== 'bars') params.set('view', filters.view);
   return params;
+}
+
+// Session links carry the page they were opened from, so the session page can link back with the same filters.
+export function sessionHref(id: string, back?: string): string {
+  return back && back !== '/' ? `/sessions/${id}?back=${encodeURIComponent(back)}` : `/sessions/${id}`;
+}
+
+// Only same-site paths are accepted, so a crafted link cannot send the user elsewhere.
+export function safeBack(value: string | string[] | undefined): string | null {
+  const back = first(value);
+  return back && back.startsWith('/') && !back.startsWith('//') ? back : null;
+}
+
+export function pathWithFilters(pathname: string, filters: Partial<Filters>): string {
+  const query = filtersToParams(filters).toString();
+  return query ? `${pathname}?${query}` : pathname;
 }

@@ -5,16 +5,17 @@ import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
 import { DataGrid, type GridColDef } from '@mui/x-data-grid';
-import { formatAic, formatDateTime, formatDuration, formatInt, formatPct, formatTokens } from '@/lib/format';
+import { formatAic, formatShortDateTime, formatDuration, formatInt, formatPct, formatTokens } from '@/lib/format';
 import type { AgentSummary } from '@/lib/types';
 import TypeBar from './TypeBar';
 
 export default function AgentsTable({ agents, total }: { agents: AgentSummary[]; total: number }) {
   const columns: GridColDef<AgentSummary>[] = [
-    { field: 'label', headerName: 'Agent', flex: 1, minWidth: 220 },
+    { field: 'name', headerName: 'Agent', flex: 1, minWidth: 200 },
+    { field: 'agentId', headerName: 'ID', width: 90, valueFormatter: (value: string) => (value ? value.slice(0, 8) : 'main') },
     { field: 'executionMode', headerName: 'Mode', width: 100 },
     { field: 'models', headerName: 'Models', width: 180 },
-    { field: 'firstTs', headerName: 'Started', type: 'number', width: 160, valueFormatter: (value: number) => formatDateTime(value) },
+    { field: 'firstTs', headerName: 'Started', type: 'number', width: 150, valueFormatter: (value: number) => formatShortDateTime(value) },
     {
       field: 'span',
       headerName: 'Span',
@@ -53,19 +54,26 @@ export default function AgentsTable({ agents, total }: { agents: AgentSummary[];
 
   return (
     <Card sx={{ mb: 3 }}>
-      <CardContent>
-        <Typography variant="h6" gutterBottom>
+      <CardContent sx={{ p: { xs: 1.5, sm: 2.5 } }}>
+        <Typography variant="h6" component="h2">
           Agents ({agents.length})
         </Typography>
-        <Box sx={{ height: agents.length > 10 ? 480 : 'auto' }}>
+        <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
+          The main agent and each sub-agent, by credits.
+        </Typography>
+        <Box>
           <DataGrid
             rows={agents}
             columns={columns}
             getRowId={(row) => row.agentId || '__main'}
             density="compact"
             disableRowSelectionOnClick
-            hideFooter={agents.length <= 100}
-            initialState={{ columns: { columnVisibilityModel: { executionMode: false } } }}
+            hideFooter={agents.length <= 10}
+            pageSizeOptions={[10, 25, 100]}
+            initialState={{
+              columns: { columnVisibilityModel: { executionMode: false, models: false, peakContext: false } },
+              pagination: { paginationModel: { pageSize: 10 } },
+            }}
           />
         </Box>
       </CardContent>

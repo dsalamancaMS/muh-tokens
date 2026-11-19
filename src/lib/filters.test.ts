@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { bucketRange, filtersToParams, parseFilters } from './filters.ts';
+import { bucketRange, filtersToParams, parseFilters, safeBack, sessionHref } from './filters.ts';
 import { bucketSlices, pickStepMinutes, stepRange } from './sessionTimeline.ts';
 import type { UsageSlice } from './types.ts';
 
@@ -26,12 +26,12 @@ test('parseFilters treats a custom "to" date as inclusive and rejects reversed r
 
 test('filtersToParams writes only the values that differ from the defaults', () => {
   const filters = parseFilters(
-    { range: '30d', stack: 'model', metric: 'tokens', project: 'AKSpider', pmetric: 'tokens', pchart: 'cumulative', chart: 'bogus' },
+    { range: '30d', stack: 'model', metric: 'tokens', project: 'AKSpider', view: 'cumulative', bucket: 'bogus' },
     now,
     0,
   );
   const params = filtersToParams(filters);
-  assert.equal(params.toString(), 'range=30d&project=AKSpider&stack=model&metric=tokens&pmetric=tokens&pchart=cumulative');
+  assert.equal(params.toString(), 'range=30d&project=AKSpider&stack=model&metric=tokens&view=cumulative');
   assert.equal(filtersToParams(parseFilters({}, now, 0)).toString(), '');
 });
 
@@ -85,4 +85,12 @@ test('bucketSlices sums each type per step and tracks rewrites and the running t
   );
   assert.deepEqual(buckets.rewriteAic, [0, 0, 4]);
   assert.deepEqual(buckets.cumulativeAic, [3, 3, 7]);
+});
+
+test('safeBack accepts only same-site paths', () => {
+  assert.equal(safeBack('/sessions?range=30d'), '/sessions?range=30d');
+  assert.equal(safeBack('//evil.example'), null);
+  assert.equal(safeBack('https://evil.example'), null);
+  assert.equal(sessionHref('abc', '/?range=30d'), '/sessions/abc?back=%2F%3Frange%3D30d');
+  assert.equal(sessionHref('abc', '/'), '/sessions/abc');
 });

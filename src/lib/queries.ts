@@ -4,6 +4,7 @@ import { bucketRange, bucketStart, type Filters, type Stack } from './filters.ts
 import { floorToStep, pickStepMinutes, stepRange } from './sessionTimeline.ts';
 import type {
   AgentSummary,
+  RewriteSummary,
   BreakdownRow,
   ByType,
   RewriteRow,
@@ -50,7 +51,29 @@ const STACK_KEY: Record<Exclude<Stack, 'type'>, string> = {
 
 const OTHER = '__other';
 const STACK_LIMIT = 8;
-const PALETTE = ['#1e88e5', '#43a047', '#fb8c00', '#8e24aa', '#e53935', '#00acc1', '#fdd835', '#6d4c41', '#bdbdbd'];
+// Kept apart from the token-type colours, so a colour means the same thing on every chart.
+const PALETTE = ['#3949ab', '#00897b', '#d81b60', '#f9a825', '#00acc1', '#8d6e63', '#7cb342', '#f4511e', '#5e35b1', '#039be5'];
+export const OTHER_COLOR = '#757575';
+
+function hash(value: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < value.length; i++) h = Math.imul(h ^ value.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+
+// Each key gets a colour from a hash of its name, so a project keeps its colour when the range changes.
+// Collisions move to the next free colour, in the order the keys are given.
+export function categoryColors(keys: string[]): Map<string, string> {
+  const used = new Set<number>();
+  const colors = new Map<string, string>();
+  for (const key of keys) {
+    let i = hash(key) % PALETTE.length;
+    for (let tries = 0; used.has(i) && tries < PALETTE.length; tries++) i = (i + 1) % PALETTE.length;
+    used.add(i);
+    colors.set(key, PALETTE[i]);
+  }
+  return colors;
+}
 
 type Row = Record<string, SQLInputValue>;
 
@@ -176,11 +199,12 @@ function stackRows(db: DatabaseSync, filters: Filters): StackRows {
   const labels = filters.stack === 'session' ? sessionLabels(db, top) : new Map(top.map((k) => [k, k]));
   const keys = rows.some((r) => r.k === OTHER) ? [...top, OTHER] : top;
   const position = new Map(keys.map((k, i) => [k, i]));
+  const colors = categoryColors(top);
   return {
-    keys: keys.map((key, i) => ({
+    keys: keys.map((key) => ({
       id: key,
       label: key === OTHER ? 'Other' : (labels.get(key) ?? key),
-      color: key === OTHER ? PALETTE[PALETTE.length - 1] : PALETTE[i % (PALETTE.length - 1)],
+      color: key === OTHER ? OTHER_COLOR : colors.get(key),
     })),
     rows: rows.map((row) => {
       const values = new Array(keys.length).fill(0);
@@ -202,27 +226,32 @@ function aggregate(source: StackRows, buckets: number[], bucketMinutes: number, 
 }
 
 const BUCKET_MINUTES = { hour: 60, day: 1440, week: 10080 };
-const TIME_CHART_POINTS = 200;
+const FINE_CHART_POINTS = 200;
 
-// The bar chart uses the hour, day or week buckets from the filters. The time charts use the finest step
-// that keeps the range under TIME_CHART_POINTS points. The project chart always has one series per project
-// and its own metric.
-export function getTimelines(db: DatabaseSync, filters: Filters): { bars: Timeline; time: Timeline; projects: Timeline } {
+// Bars use the hour, day or week buckets. Line views use the same buckets when the user picked one,
+// otherwise the finest step that keeps the range under FINE_CHART_POINTS points.
+export function getUsageTimeline(db: DatabaseSync, filters: Filters): Timeline {
   const source = stackRows(db, filters);
-  const step = pickStepMinutes(filters.toMs - filters.fromMs, TIME_CHART_POINTS);
-  const steps = stepRange(filters.fromMs, filters.toMs, step);
-  const floor = (ms: number) => floorToStep(ms, step);
-  const projectSource =
-    filters.stack === 'project' && filters.metric === filters.projectMetric
-      ? source
-      : stackRows(db, { ...filters, stack: 'project', metric: filters.projectMetric });
-  return {
-    bars: aggregate(source, bucketRange(filters.fromMs, filters.toMs, filters.bucket), BUCKET_MINUTES[filters.bucket], (ms) =>
-      bucketStart(ms, filters.bucket),
-    ),
-    time: aggregate(source, steps, step, floor),
-    projects: aggregate(projectSource, steps, step, floor),
-  };
+  if (filters.view === 'bars' || filters.bucketParam !== 'auto') {
+    const bucket = filters.bucket;
+    return aggregate(source, bucketRange(filters.fromMs, filters.toMs, bucket), BUCKET_MINUTES[bucket], (ms) =>
+      bucketStart(ms, bucket),
+    );
+  }
+  const step = pickStepMinutes(filters.toMs - filters.fromMs, FINE_CHART_POINTS);
+  return aggregate(source, stepRange(filters.fromMs, filters.toMs, step), step, (ms) => floorToStep(ms, step));
+}
+
+function sessionDetails(db: DatabaseSync, ids: string[]): Map<string, { label: string; detail: string }> {
+  const rows = db
+    .prepare('SELECT id, summary, project FROM sessions WHERE id IN (SELECT value FROM json_each(?))')
+    .all(JSON.stringify(ids)) as Row[];
+  const result = new Map(ids.map((id) => [id, { label: sessionTitle(null, id), detail: shortId(id) }]));
+  for (const row of rows) {
+    const id = String(row.id);
+    result.set(id, { label: sessionTitle(str(row.summary), id), detail: `${str(row.project) ?? '(unknown)'} • ${shortId(id)}` });
+  }
+  return result;
 }
 
 export function getBreakdown(db: DatabaseSync, filters: Filters, dimension: Exclude<Stack, 'type'>, limit = 15): BreakdownRow[] {
@@ -233,8 +262,48 @@ export function getBreakdown(db: DatabaseSync, filters: Filters, dimension: Excl
     )
     .all(...w.args, limit) as Row[];
   const keys = rows.map((r) => String(r.k));
-  const labels = dimension === 'session' ? sessionLabels(db, keys) : null;
-  return rows.map((row) => ({ key: String(row.k), label: labels?.get(String(row.k)) ?? String(row.k), ...toTotals(row) }));
+  const details = dimension === 'session' ? sessionDetails(db, keys) : null;
+  return rows.map((row) => {
+    const key = String(row.k);
+    const session = details?.get(key);
+    return { key, label: session?.label ?? key, detail: session?.detail, ...toTotals(row) };
+  });
+}
+
+const GAP_BANDS: [number, string][] = [
+  [600, '5 to 10 min'],
+  [1800, '10 to 30 min'],
+  [7200, '30 min to 2 h'],
+  [Infinity, 'Over 2 h'],
+];
+
+// The sessions that paid most for idle cache rewrites, and how long the agents were idle before them.
+export function getRewriteSummary(db: DatabaseSync, filters: Filters, limit = 5): RewriteSummary {
+  const w = where(filters);
+  const top = db
+    .prepare(
+      `SELECT c.session_id AS k, SUM(c.rewrite_nano) AS n, SUM(c.rewrites) AS r ${FROM}
+       WHERE ${w.sql} AND c.rewrites > 0 GROUP BY k ORDER BY n DESC LIMIT ?`,
+    )
+    .all(...w.args, limit) as Row[];
+  const details = sessionDetails(db, top.map((r) => String(r.k)));
+  const bandSql = `CASE ${GAP_BANDS.slice(0, -1).map(([max], i) => `WHEN r.gap_s < ${max} THEN ${i}`).join(' ')} ELSE ${GAP_BANDS.length - 1} END`;
+  const gaps = db
+    .prepare(
+      `SELECT ${bandSql} AS band, COUNT(*) AS n, SUM(r.n_total) AS aic FROM rewrites r
+       LEFT JOIN sessions s ON s.id = r.session_id
+       WHERE r.ts >= ? AND r.ts < ? AND (? IS NULL OR s.project = ?) AND (? IS NULL OR r.model = ?)
+       GROUP BY band`,
+    )
+    .all(...w.args) as Row[];
+  const byBand = new Map(gaps.map((row) => [num(row.band), row]));
+  return {
+    sessions: top.map((row) => {
+      const key = String(row.k);
+      return { key, ...details.get(key)!, aic: num(row.n) / NANO, rewrites: num(row.r) };
+    }),
+    gaps: GAP_BANDS.map(([, label], i) => ({ label, count: num(byBand.get(i)?.n), aic: num(byBand.get(i)?.aic) / NANO })),
+  };
 }
 
 const SESSION_SELECT = `SELECT c.session_id AS id, s.summary, s.project, s.cwd, s.branch,

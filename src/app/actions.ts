@@ -1,7 +1,8 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { runSync } from '@/lib/server';
+import { getSyncStatus, runSync } from '@/lib/server';
+import type { SyncStatus } from '@/lib/types';
 
 export async function syncNow(): Promise<{ newCalls: number } | { error: string }> {
   try {
@@ -11,4 +12,8 @@ export async function syncNow(): Promise<{ newCalls: number } | { error: string 
   } catch (error) {
     return { error: (error as Error).message };
   }
+}
+
+export async function syncStatus(): Promise<SyncStatus> {
+  return getSyncStatus();
 }

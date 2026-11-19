@@ -47,6 +47,16 @@ export default function SessionTimeline({ buckets }: { buckets: SessionBuckets }
       ? [
           {
             type: 'line' as const,
+            id: 'rewrites',
+            label: 'Idle rewrite AIC',
+            color: '#e53935',
+            data: buckets.rewriteAic.map((value) => value || null),
+            yAxisId: 'value',
+            showMark: true,
+            valueFormatter: (value: number | null) => (value ? formatAic(value) : null),
+          },
+          {
+            type: 'line' as const,
             id: 'cumulative',
             label: 'Running total AIC',
             color: '#7a7a7a',
@@ -61,14 +71,16 @@ export default function SessionTimeline({ buckets }: { buckets: SessionBuckets }
 
   return (
     <Card sx={{ mb: 3 }}>
-      <CardContent>
+      <CardContent sx={{ p: { xs: 1.5, sm: 2.5 } }}>
         <Stack direction="row" spacing={2} sx={{ alignItems: 'center', mb: 1 }}>
-          <Typography variant="h6" sx={{ flexGrow: 1 }}>
-            Usage over time{' '}
-            <Typography component="span" variant="body2" color="text.secondary">
-              ({formatDuration(buckets.stepMinutes * 60_000)} buckets)
+          <Box sx={{ flexGrow: 1 }}>
+            <Typography variant="h6" component="h2">
+              Usage over time
             </Typography>
-          </Typography>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+              {formatDuration(buckets.stepMinutes * 60_000)} steps by token type. Red points are credits spent on idle cache rewrites.
+            </Typography>
+          </Box>
           <ToggleButtonGroup
             size="small"
             exclusive
@@ -80,7 +92,7 @@ export default function SessionTimeline({ buckets }: { buckets: SessionBuckets }
             <ToggleButton value="tokens">Tokens</ToggleButton>
           </ToggleButtonGroup>
         </Stack>
-        <Box sx={{ height: 380 }}>
+        <Box sx={{ height: { xs: 300, md: 380 } }}>
           <ChartsDataProvider
             series={series}
             xAxis={[
@@ -92,13 +104,13 @@ export default function SessionTimeline({ buckets }: { buckets: SessionBuckets }
               },
             ]}
             yAxis={[
-              { id: 'value', width: 64, valueFormatter: (value: number) => format(value) },
-              { id: 'cumulative', position: 'right', width: 64, valueFormatter: (value: number) => formatAic(value) },
+              { id: 'value', width: 48, valueFormatter: (value: number) => formatTokens(value) },
+              { id: 'cumulative', position: 'right', width: 48, valueFormatter: (value: number) => formatTokens(value) },
             ]}
             skipAnimation
           >
             <ChartsWrapper legendPosition={{ vertical: 'bottom', horizontal: 'center' }}>
-              <ChartsLegend />
+              <ChartsLegend toggleVisibilityOnClick />
               <ChartsSurface>
                 <ChartsGrid horizontal />
                 <BarPlot />
@@ -108,7 +120,7 @@ export default function SessionTimeline({ buckets }: { buckets: SessionBuckets }
                 <ChartsYAxis axisId="value" />
                 {metric === 'aic' && <ChartsYAxis axisId="cumulative" />}
               </ChartsSurface>
-              <ChartsTooltip trigger="axis" />
+              <ChartsTooltip trigger="axis" sort="desc" />
             </ChartsWrapper>
           </ChartsDataProvider>
         </Box>

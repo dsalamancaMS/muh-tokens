@@ -16,6 +16,13 @@ export interface UsageTotals {
 export interface BreakdownRow extends UsageTotals {
   key: string;
   label: string;
+  // Second line for sessions: project and short id, so sessions with the same title can be told apart.
+  detail?: string;
+}
+
+export interface RewriteSummary {
+  sessions: { key: string; label: string; detail: string; aic: number; rewrites: number }[];
+  gaps: { label: string; count: number; aic: number }[];
 }
 
 export interface TimelineSeries {

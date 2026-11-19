@@ -12,9 +12,9 @@ export const TOKEN_TYPE_LABELS: Record<TokenType, string> = {
 export const TOKEN_TYPE_COLORS: Record<TokenType, string> = {
   input: '#78909c',
   cacheRead: '#43a047',
-  cacheWrite: '#fb8c00',
+  cacheWrite: '#ef6c00',
   output: '#1e88e5',
-  reasoning: '#8e24aa',
+  reasoning: '#ab47bc',
 };
 
 // Idle cache-rewrite rule used in the token_analysis reports: the same agent was idle for at
