@@ -1,15 +1,17 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import { TOKEN_TYPE_COLORS, TOKEN_TYPE_LABELS, TOKEN_TYPES, type TokenType } from './cost.ts';
-import { bucketRange, type Bucket, type Filters, type Stack } from './filters.ts';
+import { bucketRange, bucketStart, type Filters, type Stack } from './filters.ts';
+import { floorToStep, pickStepMinutes, stepRange } from './sessionTimeline.ts';
 import type {
   AgentSummary,
   BreakdownRow,
   ByType,
-  CallRow,
+  RewriteRow,
   SessionDetail,
   SessionRow,
   Timeline,
   TimelineSeries,
+  UsageSlice,
   UsageTotals,
 } from './types.ts';
 
@@ -22,7 +24,7 @@ const COLUMN: Record<TokenType, string> = {
   reasoning: 'reasoning',
 };
 
-const FROM = `FROM calls c
+const FROM = `FROM usage c
   LEFT JOIN sessions s ON s.id = c.session_id
   LEFT JOIN agents a ON a.session_id = c.session_id AND a.agent_id = c.agent_id`;
 
@@ -30,24 +32,18 @@ const AGENT_LABEL = `CASE WHEN c.agent_id = '' THEN 'main agent' ELSE COALESCE(a
 const TOTAL_TOKENS = 'c.t_input + c.t_cache_read + c.t_cache_write + c.t_output + c.t_reasoning';
 
 const SUMS = [
-  'COUNT(*) AS calls',
+  'SUM(c.calls) AS calls',
   'COUNT(DISTINCT c.session_id) AS sessions',
   ...TOKEN_TYPES.map((t) => `SUM(c.n_${COLUMN[t]}) AS n_${COLUMN[t]}`),
   ...TOKEN_TYPES.map((t) => `SUM(c.t_${COLUMN[t]}) AS t_${COLUMN[t]}`),
   'SUM(c.n_total) AS n_total',
-  'SUM(c.idle_rewrite) AS rewrites',
-  'SUM(c.idle_rewrite * c.n_total) AS rewrite_nano',
+  'SUM(c.rewrites) AS rewrites',
+  'SUM(c.rewrite_nano) AS rewrite_nano',
 ].join(', ');
-
-const BUCKET_SQL: Record<Bucket, string> = {
-  hour: "strftime('%s', strftime('%Y-%m-%d %H:00:00', c.ts / 1000, 'unixepoch', 'localtime'), 'utc') * 1000",
-  day: "strftime('%s', date(c.ts / 1000, 'unixepoch', 'localtime'), 'utc') * 1000",
-  week: "strftime('%s', date(c.ts / 1000, 'unixepoch', 'localtime', '-6 days', 'weekday 1'), 'utc') * 1000",
-};
 
 const STACK_KEY: Record<Exclude<Stack, 'type'>, string> = {
   session: 'c.session_id',
-  model: "COALESCE(c.model, '(unknown)')",
+  model: 'c.model',
   agent: AGENT_LABEL,
   project: "COALESCE(s.project, '(unknown)')",
 };
@@ -92,7 +88,7 @@ function toTotals(row: Row): UsageTotals {
 
 function where(filters: Filters): { sql: string; args: SQLInputValue[] } {
   return {
-    sql: 'c.ts >= ? AND c.ts < ? AND (? IS NULL OR s.project = ?) AND (? IS NULL OR c.model = ?)',
+    sql: 'c.bucket >= ? AND c.bucket < ? AND (? IS NULL OR s.project = ?) AND (? IS NULL OR c.model = ?)',
     args: [filters.fromMs, filters.toMs, filters.project, filters.project, filters.model, filters.model],
   };
 }
@@ -106,14 +102,14 @@ function sessionTitle(summary: string | null, id: string): string {
 }
 
 export function getEarliestTs(db: DatabaseSync): number {
-  return num((db.prepare('SELECT MIN(ts) AS ts FROM calls').get() as Row | undefined)?.ts) || Date.now();
+  return num((db.prepare('SELECT MIN(first_ts) AS ts FROM usage').get() as Row | undefined)?.ts) || Date.now();
 }
 
 export function getFilterOptions(db: DatabaseSync): { projects: string[]; models: string[] } {
   const projects = db
-    .prepare(`SELECT s.project AS v FROM calls c JOIN sessions s ON s.id = c.session_id GROUP BY 1 ORDER BY SUM(c.n_total) DESC`)
+    .prepare(`SELECT s.project AS v FROM usage c JOIN sessions s ON s.id = c.session_id GROUP BY 1 ORDER BY SUM(c.n_total) DESC`)
     .all() as Row[];
-  const models = db.prepare('SELECT c.model AS v FROM calls c GROUP BY 1 ORDER BY SUM(c.n_total) DESC').all() as Row[];
+  const models = db.prepare('SELECT c.model AS v FROM usage c GROUP BY 1 ORDER BY SUM(c.n_total) DESC').all() as Row[];
   return {
     projects: projects.map((r) => str(r.v)).filter((v): v is string => !!v),
     models: models.map((r) => str(r.v)).filter((v): v is string => !!v),
@@ -134,46 +130,31 @@ function sessionLabels(db: DatabaseSync, ids: string[]): Map<string, string> {
   return labels;
 }
 
-export function getTimeline(db: DatabaseSync, filters: Filters): Timeline {
-  const w = where(filters);
-  const bucketSql = BUCKET_SQL[filters.bucket];
-  const buckets = bucketRange(filters.fromMs, filters.toMs, filters.bucket);
-  const index = new Map(buckets.map((b, i) => [b, i]));
-  const scale = filters.metric === 'aic' ? NANO : 1;
+interface StackRows {
+  keys: Omit<TimelineSeries, 'values'>[];
+  // 5-minute bucket start and one value per key.
+  rows: { bucket: number; values: number[] }[];
+}
 
-  // SQLite and JavaScript can disagree on a bucket start around DST changes; keep any extra bucket.
-  const indexOf = (bucket: number): number => {
-    let i = index.get(bucket);
-    if (i === undefined) {
-      buckets.push(bucket);
-      buckets.sort((a, b) => a - b);
-      index.clear();
-      buckets.forEach((b, j) => index.set(b, j));
-      i = index.get(bucket)!;
-    }
-    return i;
-  };
+function stackRows(db: DatabaseSync, filters: Filters): StackRows {
+  const w = where(filters);
+  const scale = filters.metric === 'aic' ? NANO : 1;
 
   if (filters.stack === 'type') {
     const prefix = filters.metric === 'aic' ? 'n' : 't';
     const rows = db
       .prepare(
-        `SELECT ${bucketSql} AS bucket, ${TOKEN_TYPES.map((t) => `SUM(c.${prefix}_${COLUMN[t]}) AS ${prefix}_${COLUMN[t]}`).join(', ')}
-         ${FROM} WHERE ${w.sql} GROUP BY bucket ORDER BY bucket`,
+        `SELECT c.bucket AS bucket, ${TOKEN_TYPES.map((t) => `SUM(c.${prefix}_${COLUMN[t]}) AS ${prefix}_${COLUMN[t]}`).join(', ')}
+         ${FROM} WHERE ${w.sql} GROUP BY c.bucket`,
       )
       .all(...w.args) as Row[];
-    for (const row of rows) indexOf(num(row.bucket));
-    const series: TimelineSeries[] = TOKEN_TYPES.map((type) => ({
-      id: type,
-      label: TOKEN_TYPE_LABELS[type],
-      color: TOKEN_TYPE_COLORS[type],
-      values: new Array(buckets.length).fill(0),
-    }));
-    for (const row of rows) {
-      const i = index.get(num(row.bucket))!;
-      TOKEN_TYPES.forEach((type, s) => (series[s].values[i] = num(row[`${prefix}_${COLUMN[type]}`]) / scale));
-    }
-    return { buckets, series };
+    return {
+      keys: TOKEN_TYPES.map((type) => ({ id: type, label: TOKEN_TYPE_LABELS[type], color: TOKEN_TYPE_COLORS[type] })),
+      rows: rows.map((row) => ({
+        bucket: num(row.bucket),
+        values: TOKEN_TYPES.map((type) => num(row[`${prefix}_${COLUMN[type]}`]) / scale),
+      })),
+    };
   }
 
   const keySql = STACK_KEY[filters.stack];
@@ -185,25 +166,55 @@ export function getTimeline(db: DatabaseSync, filters: Filters): Timeline {
   ).map((r) => String(r.k));
   const rows = db
     .prepare(
-      `SELECT ${bucketSql} AS bucket,
+      `SELECT c.bucket AS bucket,
               CASE WHEN ${keySql} IN (SELECT value FROM json_each(?)) THEN ${keySql} ELSE '${OTHER}' END AS k,
               SUM(${metricSql}) AS v
-       ${FROM} WHERE ${w.sql} GROUP BY bucket, k`,
+       ${FROM} WHERE ${w.sql} GROUP BY c.bucket, k`,
     )
     .all(JSON.stringify(top), ...w.args) as Row[];
-  for (const row of rows) indexOf(num(row.bucket));
 
   const labels = filters.stack === 'session' ? sessionLabels(db, top) : new Map(top.map((k) => [k, k]));
   const keys = rows.some((r) => r.k === OTHER) ? [...top, OTHER] : top;
-  const series: TimelineSeries[] = keys.map((key, i) => ({
-    id: key,
-    label: key === OTHER ? 'Other' : (labels.get(key) ?? key),
-    color: key === OTHER ? PALETTE[PALETTE.length - 1] : PALETTE[i % (PALETTE.length - 1)],
-    values: new Array(buckets.length).fill(0),
-  }));
   const position = new Map(keys.map((k, i) => [k, i]));
-  for (const row of rows) series[position.get(String(row.k))!].values[index.get(num(row.bucket))!] = num(row.v) / scale;
-  return { buckets, series };
+  return {
+    keys: keys.map((key, i) => ({
+      id: key,
+      label: key === OTHER ? 'Other' : (labels.get(key) ?? key),
+      color: key === OTHER ? PALETTE[PALETTE.length - 1] : PALETTE[i % (PALETTE.length - 1)],
+    })),
+    rows: rows.map((row) => {
+      const values = new Array(keys.length).fill(0);
+      values[position.get(String(row.k))!] = num(row.v) / scale;
+      return { bucket: num(row.bucket), values };
+    }),
+  };
+}
+
+function aggregate(source: StackRows, buckets: number[], bucketMinutes: number, floor: (ms: number) => number): Timeline {
+  const index = new Map(buckets.map((b, i) => [b, i]));
+  const series: TimelineSeries[] = source.keys.map((key) => ({ ...key, values: new Array(buckets.length).fill(0) }));
+  for (const row of source.rows) {
+    const i = index.get(floor(row.bucket));
+    if (i === undefined) continue;
+    row.values.forEach((value, s) => (series[s].values[i] += value));
+  }
+  return { buckets, bucketMinutes, series };
+}
+
+const BUCKET_MINUTES = { hour: 60, day: 1440, week: 10080 };
+const TIME_CHART_POINTS = 200;
+
+// The bar chart uses the hour, day or week buckets from the filters. The time chart uses the finest step
+// that keeps the range under TIME_CHART_POINTS points.
+export function getTimelines(db: DatabaseSync, filters: Filters): { bars: Timeline; time: Timeline } {
+  const source = stackRows(db, filters);
+  const step = pickStepMinutes(filters.toMs - filters.fromMs, TIME_CHART_POINTS);
+  return {
+    bars: aggregate(source, bucketRange(filters.fromMs, filters.toMs, filters.bucket), BUCKET_MINUTES[filters.bucket], (ms) =>
+      bucketStart(ms, filters.bucket),
+    ),
+    time: aggregate(source, stepRange(filters.fromMs, filters.toMs, step), step, (ms) => floorToStep(ms, step)),
+  };
 }
 
 export function getBreakdown(db: DatabaseSync, filters: Filters, dimension: Exclude<Stack, 'type'>, limit = 15): BreakdownRow[] {
@@ -219,10 +230,10 @@ export function getBreakdown(db: DatabaseSync, filters: Filters, dimension: Excl
 }
 
 const SESSION_SELECT = `SELECT c.session_id AS id, s.summary, s.project, s.cwd, s.branch,
-    MIN(c.ts) AS first_ts, MAX(c.ts) AS last_ts,
+    MIN(c.first_ts) AS first_ts, MAX(c.last_ts) AS last_ts,
     COUNT(DISTINCT NULLIF(c.agent_id, '')) AS subagents,
     GROUP_CONCAT(DISTINCT c.model) AS models,
-    MAX(c.context_tokens) AS peak_context,
+    MAX(c.max_context) AS peak_context,
     ${SUMS}
   ${FROM}`;
 
@@ -250,7 +261,7 @@ export function getSessions(db: DatabaseSync, filters: Filters): SessionRow[] {
       `${SESSION_SELECT}
        WHERE (? IS NULL OR s.project = ?)
        GROUP BY c.session_id
-       HAVING MAX(c.ts) >= ? AND MIN(c.ts) < ? AND (? IS NULL OR SUM(c.model = ?) > 0)
+       HAVING MAX(c.last_ts) >= ? AND MIN(c.first_ts) < ? AND (? IS NULL OR SUM(c.model = ?) > 0)
        ORDER BY n_total DESC`,
     )
     .all(filters.project, filters.project, filters.fromMs, filters.toMs, filters.model, filters.model) as Row[];
@@ -261,28 +272,45 @@ export function getSessionDetail(db: DatabaseSync, id: string): SessionDetail | 
   const sessionRow = db.prepare(`${SESSION_SELECT} WHERE c.session_id = ? GROUP BY c.session_id`).get(id) as Row | undefined;
   if (!sessionRow) return null;
 
-  const calls = (
+  const slices = (
+    db
+      .prepare(`SELECT c.*, ${AGENT_LABEL} AS agent ${FROM} WHERE c.session_id = ? ORDER BY c.bucket`)
+      .all(id) as Row[]
+  ).map(
+    (row): UsageSlice => ({
+      ts: num(row.bucket),
+      agentId: String(row.agent_id),
+      agent: String(row.agent),
+      model: String(row.model),
+      calls: num(row.calls),
+      maxContext: num(row.max_context),
+      tokens: byType(row, 't'),
+      aic: byType(row, 'n', NANO),
+      aicTotal: num(row.n_total) / NANO,
+      rewriteAic: num(row.rewrite_nano) / NANO,
+    }),
+  );
+
+  const rewrites = (
     db
       .prepare(
-        `SELECT c.*, ${AGENT_LABEL} AS agent ${FROM} WHERE c.session_id = ? ORDER BY c.ts, c.id`,
+        `SELECT c.*, ${AGENT_LABEL} AS agent FROM rewrites c
+         LEFT JOIN agents a ON a.session_id = c.session_id AND a.agent_id = c.agent_id
+         WHERE c.session_id = ? ORDER BY c.n_total DESC`,
       )
       .all(id) as Row[]
   ).map(
-    (row): CallRow => ({
+    (row): RewriteRow => ({
       id: num(row.id),
       ts: num(row.ts),
       agentId: String(row.agent_id),
       agent: String(row.agent),
-      model: str(row.model) ?? '(unknown)',
-      initiator: str(row.initiator),
-      effort: str(row.reasoning_effort),
-      durationMs: row.duration_ms === null ? null : num(row.duration_ms),
+      model: String(row.model),
+      gapS: num(row.gap_s),
       context: num(row.context_tokens),
-      tokens: byType(row, 't'),
-      aic: byType(row, 'n', NANO),
+      cacheWriteTokens: num(row.t_cache_write),
+      cacheWriteAic: num(row.n_cache_write) / NANO,
       aicTotal: num(row.n_total) / NANO,
-      gapS: row.gap_s === null ? null : num(row.gap_s),
-      idleRewrite: num(row.idle_rewrite) === 1,
     }),
   );
 
@@ -290,7 +318,7 @@ export function getSessionDetail(db: DatabaseSync, id: string): SessionDetail | 
     db
       .prepare(
         `SELECT c.agent_id, ${AGENT_LABEL} AS name, a.execution_mode, GROUP_CONCAT(DISTINCT c.model) AS models,
-                MIN(c.ts) AS first_ts, MAX(c.ts) AS last_ts, MAX(c.context_tokens) AS peak_context, ${SUMS}
+                MIN(c.first_ts) AS first_ts, MAX(c.last_ts) AS last_ts, MAX(c.max_context) AS peak_context, ${SUMS}
          ${FROM} WHERE c.session_id = ? GROUP BY c.agent_id ORDER BY n_total DESC`,
       )
       .all(id) as Row[]
@@ -310,5 +338,5 @@ export function getSessionDetail(db: DatabaseSync, id: string): SessionDetail | 
     };
   });
 
-  return { session: toSession(sessionRow), calls, agents };
+  return { session: toSession(sessionRow), slices, rewrites, agents };
 }

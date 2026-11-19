@@ -7,5 +7,5 @@ export const SOURCE_DB = process.env.MUH_TOKENS_SOURCE_DB ?? path.join(copilotDi
 export const SESSION_STATE_DIR = path.join(copilotDir, 'session-state');
 export const DATA_DB = process.env.MUH_TOKENS_DB ?? path.join(process.cwd(), '.data', 'muh-tokens.db');
 
-// Minimum time between two syncs triggered by page loads.
-export const SYNC_INTERVAL_MS = 10_000;
+// Minutes between background syncs. 0 turns the timer off; the Sync button and npm run sync still work.
+export const SYNC_INTERVAL_MINUTES = Number(process.env.MUH_TOKENS_SYNC_MINUTES ?? 5);

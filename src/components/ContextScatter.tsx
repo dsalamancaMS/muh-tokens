@@ -16,15 +16,15 @@ export interface ContextSeries {
 
 const REWRITE_COLOR = '#d32f2f';
 
-// Context size of every model call. Idle cache rewrites are drawn on top in red.
+// Largest context per agent in each 5-minute bucket. Idle cache rewrites are drawn on top in red.
 export default function ContextScatter({ series, rewrites }: { series: ContextSeries[]; rewrites: [number, number][] }) {
   const toData = (points: [number, number][]) => points.map(([x, y]) => ({ x, y }));
   return (
     <Card sx={{ mb: 3 }}>
       <CardContent>
-        <Typography variant="h6">Context size per call</Typography>
+        <Typography variant="h6">Context size</Typography>
         <Typography variant="body2" color="text.secondary">
-          Input tokens sent with each call, by agent. Red points are idle cache rewrites: the call came 5 minutes or more
+          Largest input sent by each agent in each 5-minute period. Red points are idle cache rewrites: the call came 5 minutes or more
           after the same agent&apos;s previous call, so the prompt cache had expired and the context was written again.
         </Typography>
         <Box sx={{ height: 380 }}>
@@ -40,7 +40,7 @@ export default function ContextScatter({ series, rewrites }: { series: ContextSe
                 data: toData(s.points),
                 markerSize: 2,
                 valueFormatter: (value: { x: number; y: number } | null) =>
-                  value ? `${formatTokens(value.y)} tokens at ${formatDateTime(value.x)}` : '',
+                  value ? `up to ${formatTokens(value.y)} tokens at ${formatDateTime(value.x)}` : '',
               })),
               {
                 id: '__rewrites',

@@ -136,10 +136,10 @@ export default function FiltersBar({ filters, projects, models, sync, showBucket
           </Select>
         </FormControl>
         <Stack direction="row" spacing={1} sx={{ ml: 'auto', alignItems: 'center' }}>
-          {sync.scanning && <Chip size="small" label="Indexing sub-agent names" />}
-          {sync.scanError && <Chip size="small" color="warning" label="Sub-agent index failed" title={sync.scanError} />}
+          {sync.syncing && <Chip size="small" label="Syncing" />}
+          {sync.error && <Chip size="small" color="warning" label="Last sync failed" title={sync.error} />}
           <Typography variant="caption" color="text.secondary">
-            {sync.lastSync ? `Synced ${formatTime(sync.lastSync)}` : ''}
+            {sync.lastSync ? `Synced ${formatTime(sync.lastSync)}` : 'Not synced since the server started'}
           </Typography>
         </Stack>
       </Stack>

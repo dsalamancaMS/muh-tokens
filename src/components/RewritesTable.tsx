@@ -8,17 +8,18 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
 import { formatAic, formatDateTime, formatDuration, formatTokens } from '@/lib/format';
-import type { CallRow } from '@/lib/types';
+import type { RewriteRow } from '@/lib/types';
 
-export default function RewritesTable({ calls }: { calls: CallRow[] }) {
-  if (calls.length === 0) return null;
-  const total = calls.reduce((sum, call) => sum + call.aicTotal, 0);
+// Rewrites arrive sorted by cost, largest first.
+export default function RewritesTable({ rewrites }: { rewrites: RewriteRow[] }) {
+  if (rewrites.length === 0) return null;
+  const total = rewrites.reduce((sum, rewrite) => sum + rewrite.aicTotal, 0);
   return (
     <Card sx={{ mb: 3 }}>
       <CardContent>
         <Typography variant="h6">Idle cache rewrites</Typography>
         <Typography variant="body2" color="text.secondary" gutterBottom>
-          {calls.length} calls cost {formatAic(total)} AIC after an idle gap. Largest first.
+          {rewrites.length} calls cost {formatAic(total)} AIC after an idle gap. Largest first.
         </Typography>
         <Box sx={{ maxHeight: 480, overflow: 'auto' }}>
           <Table size="small" stickyHeader>
@@ -34,26 +35,23 @@ export default function RewritesTable({ calls }: { calls: CallRow[] }) {
               </TableRow>
             </TableHead>
             <TableBody>
-              {[...calls]
-                .sort((a, b) => b.aicTotal - a.aicTotal)
-                .slice(0, 50)
-                .map((call) => (
-                  <TableRow key={call.id} hover>
-                    <TableCell>{formatDateTime(call.ts)}</TableCell>
-                    <TableCell>{call.agent}</TableCell>
-                    <TableCell align="right">{formatDuration((call.gapS ?? 0) * 1000)}</TableCell>
-                    <TableCell align="right">{formatTokens(call.context)}</TableCell>
-                    <TableCell align="right">{formatTokens(call.tokens.cacheWrite)}</TableCell>
-                    <TableCell align="right">{formatAic(call.aic.cacheWrite)}</TableCell>
-                    <TableCell align="right">{formatAic(call.aicTotal)}</TableCell>
-                  </TableRow>
-                ))}
+              {rewrites.slice(0, 50).map((rewrite) => (
+                <TableRow key={rewrite.id} hover>
+                  <TableCell>{formatDateTime(rewrite.ts)}</TableCell>
+                  <TableCell>{rewrite.agent}</TableCell>
+                  <TableCell align="right">{formatDuration(rewrite.gapS * 1000)}</TableCell>
+                  <TableCell align="right">{formatTokens(rewrite.context)}</TableCell>
+                  <TableCell align="right">{formatTokens(rewrite.cacheWriteTokens)}</TableCell>
+                  <TableCell align="right">{formatAic(rewrite.cacheWriteAic)}</TableCell>
+                  <TableCell align="right">{formatAic(rewrite.aicTotal)}</TableCell>
+                </TableRow>
+              ))}
             </TableBody>
           </Table>
         </Box>
-        {calls.length > 50 && (
+        {rewrites.length > 50 && (
           <Typography variant="caption" color="text.secondary">
-            Showing the 50 most expensive of {calls.length}.
+            Showing the 50 most expensive of {rewrites.length}.
           </Typography>
         )}
       </CardContent>

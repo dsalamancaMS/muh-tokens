@@ -2,9 +2,9 @@
 
 A local web app that shows GitHub Copilot CLI token and AI credit (AIC) usage over time. It reads the session store that Copilot CLI writes on your machine and nothing else.
 
-- The dashboard shows totals, a stacked timeline of AIC or tokens, the split by token type, the top sessions, and breakdowns by model, project and agent. The timeline can be stacked by token type, session, model, project or agent. When it is stacked by session, clicking a bar opens that session.
+- The dashboard shows totals, a stacked timeline of AIC or tokens, the split by token type, the top sessions, and breakdowns by model, project and agent. The timeline can be stacked by token type, session, model, project or agent. Below it, a time chart shows the same series on a continuous time axis at a finer step, as lines, a stacked area or a running total. When either chart is stacked by session, clicking a series opens that session.
 - The sessions page lists every session in the selected range with its AIC, tokens, calls and per-type split.
-- The session page shows one session: a timeline of AIC or tokens by type with a running AIC total, the context size of each call per agent, the sub-agents, the most expensive idle cache rewrites, and every model call.
+- The session page shows one session: a timeline of AIC or tokens by type with a running AIC total, the largest context per agent in each 5-minute period, the sub-agents, and the most expensive idle cache rewrites.
 
 ## Running it
 
@@ -15,7 +15,7 @@ npm install
 npm run dev        # http://localhost:4817
 ```
 
-Each page load syncs new usage from the Copilot store, at most once every 10 seconds. To sync without starting the server, run `npm run sync`.
+Pages read only the app's own database, never the Copilot store. The server syncs new usage when it starts and then every 5 minutes, and the Sync button in the top bar syncs on demand. To sync without starting the server, run `npm run sync`.
 
 Other scripts: `npm test`, `npm run lint`, `npm run typecheck`, `npm run build` and `npm start`.
 
@@ -27,16 +27,18 @@ docker compose up -d --build    # http://localhost:4817
 
 Compose mounts `~/.copilot` read-only at `/copilot` and keeps the app's store in the `muh-tokens-data` volume. Set `COPILOT_DIR` to mount a different Copilot folder. The port is bound to 127.0.0.1 only.
 
-The mount must stay read-only. The Copilot database uses WAL mode, and SQLite's WAL index is shared memory, which is not kept consistent between the host and a container VM. A read-only mount stops the container from writing to it. `npm run sync` is not available in the image; page loads sync instead.
+The mount must stay read-only. The Copilot database uses WAL mode, and SQLite's WAL index is shared memory, which is not kept consistent between the host and a container VM. A read-only mount stops the container from writing to it. `npm run sync` is not available in the image; use the Sync button or wait for the timer.
 
 ## Data
 
 The app reads two sources:
 
 - `~/.copilot/session-store.db`, opened read-only. It uses the `sessions` and `assistant_usage_events` tables.
-- `~/.copilot/session-state/<session>/events.jsonl`, which it scans for `subagent.started` and `subagent.configured` events to get sub-agent names. Page loads index these in the background, so a new sub-agent can show as its ID until the next load.
+- `~/.copilot/session-state/<session>/events.jsonl`, which it scans for `subagent.started` and `subagent.configured` events to get sub-agent names. Each sync indexes these after it reads new calls.
 
-It copies what it needs into `.data/muh-tokens.db`. Syncs are incremental: new calls are found by event ID, and each `events.jsonl` is read from the offset where the last scan stopped. Delete `.data/` to rebuild from scratch.
+It stores the results in `.data/muh-tokens.db`, which is about 8 MB for 220,000 calls. Calls are not kept one by one. They are summed into 5-minute buckets per session, agent and model, with the tokens and AIC of each type, the call count, the largest context and the idle rewrite totals. Idle cache rewrites are the one exception: each one is kept as its own row. Charts can therefore go no finer than 5 minutes.
+
+Syncs are incremental. New calls are found by event ID and added to their buckets, and each `events.jsonl` is read from the offset where the last scan stopped. Delete `.data/` to rebuild from scratch. The store is also rebuilt when its schema version changes.
 
 These environment variables override the default paths:
 
@@ -45,6 +47,7 @@ These environment variables override the default paths:
 | `MUH_TOKENS_COPILOT_DIR` | `~/.copilot` |
 | `MUH_TOKENS_SOURCE_DB` | `$MUH_TOKENS_COPILOT_DIR/session-store.db` |
 | `MUH_TOKENS_DB` | `./.data/muh-tokens.db` |
+| `MUH_TOKENS_SYNC_MINUTES` | `5`. Set it to `0` to turn off the timer and sync only from the button or at startup. |
 
 ## How usage is split
 

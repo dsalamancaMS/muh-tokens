@@ -6,6 +6,8 @@ export const STACKS = ['type', 'session', 'model', 'agent', 'project'] as const;
 export type Stack = (typeof STACKS)[number];
 export const METRICS = ['aic', 'tokens'] as const;
 export type Metric = (typeof METRICS)[number];
+export const CHARTS = ['line', 'area', 'cumulative'] as const;
+export type Chart = (typeof CHARTS)[number];
 
 export interface Filters {
   preset: Preset;
@@ -19,6 +21,7 @@ export interface Filters {
   model: string | null;
   stack: Stack;
   metric: Metric;
+  chart: Chart;
 }
 
 export type SearchParams = Record<string, string | string[] | undefined>;
@@ -90,6 +93,7 @@ export function parseFilters(params: SearchParams, now: number, earliestMs: numb
     model: first(params.model) || null,
     stack: oneOf(first(params.stack), STACKS, 'type'),
     metric: oneOf(first(params.metric), METRICS, 'aic'),
+    chart: oneOf(first(params.chart), CHARTS, 'line'),
   };
 }
 
@@ -128,5 +132,6 @@ export function filtersToParams(filters: Partial<Filters>): URLSearchParams {
   if (filters.model) params.set('model', filters.model);
   if (filters.stack && filters.stack !== 'type') params.set('stack', filters.stack);
   if (filters.metric && filters.metric !== 'aic') params.set('metric', filters.metric);
+  if (filters.chart && filters.chart !== 'line') params.set('chart', filters.chart);
   return params;
 }

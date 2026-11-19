@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { bucketRange, filtersToParams, parseFilters } from './filters.ts';
-import { bucketCalls, pickStepMinutes } from './sessionTimeline.ts';
-import type { CallRow } from './types.ts';
+import { bucketSlices, pickStepMinutes, stepRange } from './sessionTimeline.ts';
+import type { UsageSlice } from './types.ts';
 
 const DAY = 86_400_000;
 const now = new Date(2026, 10, 19, 15, 30).getTime();
@@ -40,31 +40,36 @@ test('bucketRange covers the range with local day starts', () => {
   );
 });
 
-test('pickStepMinutes keeps a session timeline to at most 160 buckets', () => {
-  assert.equal(pickStepMinutes(60 * 60_000), 1);
+test('pickStepMinutes keeps a timeline to at most 160 buckets and never goes below the 5-minute rollup', () => {
+  assert.equal(pickStepMinutes(60 * 60_000), 5);
   assert.equal(pickStepMinutes(10 * 60 * 60_000), 5);
   assert.equal(pickStepMinutes(8 * DAY), 180);
 });
 
-test('bucketCalls sums each type per bucket and tracks rewrites and the running total', () => {
+test('stepRange starts at the step containing the start and stops before the end', () => {
+  const from = new Date(2026, 10, 19, 10, 7).getTime();
+  const to = new Date(2026, 10, 19, 11, 0).getTime();
+  assert.deepEqual(
+    stepRange(from, to, 15),
+    [0, 15, 30, 45].map((minute) => new Date(2026, 10, 19, 10, minute).getTime()),
+  );
+});
+
+test('bucketSlices sums each type per step and tracks rewrites and the running total', () => {
   const zero = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0, reasoning: 0 };
-  const call = (minute: number, aic: number, idleRewrite = false): CallRow => ({
-    id: minute,
+  const slice = (minute: number, aic: number, rewriteAic = 0): UsageSlice => ({
     ts: new Date(2026, 10, 19, 10, minute).getTime(),
     agentId: '',
     agent: 'main agent',
     model: 'm',
-    initiator: null,
-    effort: null,
-    durationMs: null,
-    context: 0,
+    calls: 1,
+    maxContext: 0,
     tokens: { ...zero, cacheRead: 10 },
     aic: { ...zero, cacheRead: aic },
     aicTotal: aic,
-    gapS: null,
-    idleRewrite,
+    rewriteAic,
   });
-  const buckets = bucketCalls([call(0, 1), call(3, 2), call(12, 4, true)], 5);
+  const buckets = bucketSlices([slice(0, 1), slice(5, 2), slice(30, 4, 4)], 15);
   assert.equal(buckets.starts.length, 3);
   assert.deepEqual(
     buckets.aic.map((b) => b.cacheRead),

@@ -5,7 +5,6 @@ import Breadcrumbs from '@mui/material/Breadcrumbs';
 import RouterLink from '@/components/RouterLink';
 import Typography from '@mui/material/Typography';
 import AgentsTable from '@/components/AgentsTable';
-import CallsGrid from '@/components/CallsGrid';
 import ContextScatter, { type ContextSeries } from '@/components/ContextScatter';
 import KpiCards from '@/components/KpiCards';
 import RewritesTable from '@/components/RewritesTable';
@@ -14,28 +13,26 @@ import TypeBreakdown from '@/components/TypeBreakdown';
 import { formatDateTime, formatDuration } from '@/lib/format';
 import { getSessionDetail, shortId } from '@/lib/queries';
 import { getStore } from '@/lib/server';
-import { bucketCalls } from '@/lib/sessionTimeline';
-import type { CallRow } from '@/lib/types';
+import { bucketSlices } from '@/lib/sessionTimeline';
+import type { UsageSlice } from '@/lib/types';
 
-const PAGE_SIZE = 100;
 const MAX_SCATTER_SERIES = 8;
 
 interface Props {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ page?: string }>;
 }
 
-// Groups calls by agent for the context chart. Small agents share one series so the legend stays short.
-function contextSeries(calls: CallRow[]): ContextSeries[] {
+// Groups the 5-minute peaks by agent for the context chart. Small agents share one series so the legend stays short.
+function contextSeries(slices: UsageSlice[]): ContextSeries[] {
   const byAgent = new Map<string, ContextSeries>();
-  for (const call of calls) {
-    let series = byAgent.get(call.agentId);
+  for (const slice of slices) {
+    let series = byAgent.get(slice.agentId);
     if (!series) {
-      const label = call.agentId ? `${call.agent} (${shortId(call.agentId)})` : call.agent;
-      series = { id: call.agentId || '__main', label, points: [] };
-      byAgent.set(call.agentId, series);
+      const label = slice.agentId ? `${slice.agent} (${shortId(slice.agentId)})` : slice.agent;
+      series = { id: slice.agentId || '__main', label, points: [] };
+      byAgent.set(slice.agentId, series);
     }
-    series.points.push([call.ts, call.context]);
+    series.points.push([slice.ts, slice.maxContext]);
   }
   const sorted = [...byAgent.values()].sort((a, b) => b.points.length - a.points.length);
   if (sorted.length <= MAX_SCATTER_SERIES) return sorted;
@@ -50,17 +47,13 @@ export async function generateMetadata({ params }: Props) {
   return { title: `Session ${shortId(id)} | muh-tokens` };
 }
 
-export default async function SessionPage({ params, searchParams }: Props) {
+export default async function SessionPage({ params }: Props) {
   await connection();
   const { id } = await params;
-  const { page: pageParam } = await searchParams;
   const detail = getSessionDetail(getStore(), id);
   if (!detail) notFound();
 
-  const { session, calls, agents } = detail;
-  const pages = Math.max(1, Math.ceil(calls.length / PAGE_SIZE));
-  const page = Math.min(Math.max(0, Number.parseInt(pageParam ?? '0', 10) || 0), pages - 1);
-  const rewrites = calls.filter((call) => call.idleRewrite);
+  const { session, slices, rewrites, agents } = detail;
 
   return (
     <>
@@ -84,17 +77,13 @@ export default async function SessionPage({ params, searchParams }: Props) {
         <div>Session ID: {id}</div>
       </Typography>
       <KpiCards totals={session} subagents={session.subagents} />
-      <SessionTimeline buckets={bucketCalls(calls)} />
-      <ContextScatter series={contextSeries(calls)} rewrites={rewrites.map((call) => [call.ts, call.context])} />
+      <SessionTimeline buckets={bucketSlices(slices)} />
+      <ContextScatter series={contextSeries(slices)} rewrites={rewrites.map((rewrite) => [rewrite.ts, rewrite.context])} />
       <Box sx={{ mb: 3 }}>
         <TypeBreakdown totals={session} />
       </Box>
       <AgentsTable agents={agents} total={session.aicTotal} />
-      <RewritesTable calls={rewrites} />
-      <Typography variant="h6" gutterBottom>
-        Calls
-      </Typography>
-      <CallsGrid rows={calls.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)} total={calls.length} page={page} pageSize={PAGE_SIZE} />
+      <RewritesTable rewrites={rewrites} />
     </>
   );
 }

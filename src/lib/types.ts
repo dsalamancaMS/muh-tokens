@@ -27,6 +27,7 @@ export interface TimelineSeries {
 
 export interface Timeline {
   buckets: number[];
+  bucketMinutes: number;
   series: TimelineSeries[];
 }
 
@@ -43,21 +44,31 @@ export interface SessionRow extends UsageTotals {
   peakContext: number;
 }
 
-export interface CallRow {
+// One 5-minute rollup of a session's calls for one agent and model.
+export interface UsageSlice {
+  ts: number;
+  agentId: string;
+  agent: string;
+  model: string;
+  calls: number;
+  maxContext: number;
+  tokens: ByType;
+  aic: ByType;
+  aicTotal: number;
+  rewriteAic: number;
+}
+
+export interface RewriteRow {
   id: number;
   ts: number;
   agentId: string;
   agent: string;
   model: string;
-  initiator: string | null;
-  effort: string | null;
-  durationMs: number | null;
+  gapS: number;
   context: number;
-  tokens: ByType;
-  aic: ByType;
+  cacheWriteTokens: number;
+  cacheWriteAic: number;
   aicTotal: number;
-  gapS: number | null;
-  idleRewrite: boolean;
 }
 
 export interface AgentSummary extends UsageTotals {
@@ -73,12 +84,13 @@ export interface AgentSummary extends UsageTotals {
 
 export interface SessionDetail {
   session: SessionRow;
-  calls: CallRow[];
+  slices: UsageSlice[];
+  rewrites: RewriteRow[];
   agents: AgentSummary[];
 }
 
 export interface SyncStatus {
   lastSync: number;
-  scanning: boolean;
-  scanError: string | null;
+  syncing: boolean;
+  error: string | null;
 }

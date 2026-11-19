@@ -26,14 +26,12 @@ const STACK_LABELS: Record<StackBy, string> = {
   project: 'Project',
 };
 
-const BUCKET_MINUTES = { hour: 60, day: 1440, week: 10080 };
-
 export default function TimelineChart({ timeline, filters }: { timeline: Timeline; filters: Filters }) {
   const router = useRouter();
   const pathname = usePathname();
   const [, startTransition] = useTransition();
   const format = filters.metric === 'aic' ? formatAic : formatTokens;
-  const minutes = BUCKET_MINUTES[filters.bucket];
+  const minutes = timeline.bucketMinutes;
 
   const apply = (change: Partial<Filters>) => {
     const query = filtersToParams({ ...filters, ...change }).toString();

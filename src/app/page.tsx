@@ -3,10 +3,11 @@ import Grid from '@mui/material/Grid';
 import BreakdownTable from '@/components/BreakdownTable';
 import FiltersBar from '@/components/FiltersBar';
 import KpiCards from '@/components/KpiCards';
+import TimeChart from '@/components/TimeChart';
 import TimelineChart from '@/components/TimelineChart';
 import TypeBreakdown from '@/components/TypeBreakdown';
 import type { SearchParams } from '@/lib/filters';
-import { getBreakdown, getFilterOptions, getTimeline, getTotals } from '@/lib/queries';
+import { getBreakdown, getFilterOptions, getTimelines, getTotals } from '@/lib/queries';
 import { getRequestFilters, getStore, getSyncStatus } from '@/lib/server';
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -16,12 +17,14 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const filters = getRequestFilters(db, params);
   const totals = getTotals(db, filters);
   const { projects, models } = getFilterOptions(db);
+  const timelines = getTimelines(db, filters);
 
   return (
     <>
       <FiltersBar filters={filters} projects={projects} models={models} sync={getSyncStatus()} showBucket />
       <KpiCards totals={totals} />
-      <TimelineChart timeline={getTimeline(db, filters)} filters={filters} />
+      <TimelineChart timeline={timelines.bars} filters={filters} />
+      <TimeChart timeline={timelines.time} filters={filters} />
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, xl: 5 }}>
           <TypeBreakdown totals={totals} />

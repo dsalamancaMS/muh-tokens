@@ -1,6 +1,6 @@
 'use client';
 
-import { useTransition } from 'react';
+import { useState, useTransition } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import AppBar from '@mui/material/AppBar';
@@ -8,12 +8,14 @@ import Box from '@mui/material/Box';
 import Container from '@mui/material/Container';
 import IconButton from '@mui/material/IconButton';
 import LinearProgress from '@mui/material/LinearProgress';
+import Snackbar from '@mui/material/Snackbar';
 import Tab from '@mui/material/Tab';
 import Tabs from '@mui/material/Tabs';
 import Toolbar from '@mui/material/Toolbar';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import { useColorScheme } from '@mui/material/styles';
+import { syncNow } from '@/app/actions';
 
 function RefreshIcon() {
   return (
@@ -35,7 +37,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [message, setMessage] = useState<string | null>(null);
   const { mode, systemMode, setMode } = useColorScheme();
+
+  const sync = () =>
+    startTransition(async () => {
+      const result = await syncNow();
+      setMessage('error' in result ? result.error : `Synced ${result.newCalls.toLocaleString('en-AU')} new calls`);
+      router.refresh();
+    });
   const tab = pathname.startsWith('/sessions') ? '/sessions' : '/';
   const effective = mode === 'system' ? systemMode : mode;
 
@@ -50,8 +60,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <Tab label="Timeline" value="/" component={Link} href="/" />
             <Tab label="Sessions" value="/sessions" component={Link} href="/sessions" />
           </Tabs>
-          <Tooltip title="Pull new calls from the Copilot session store">
-            <IconButton aria-label="Refresh data" onClick={() => startTransition(() => router.refresh())}>
+          <Tooltip title="Sync now from the Copilot session store">
+            <IconButton aria-label="Sync now" onClick={sync} disabled={pending}>
               <RefreshIcon />
             </IconButton>
           </Tooltip>
@@ -63,6 +73,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </Toolbar>
         {pending && <LinearProgress sx={{ position: 'absolute', bottom: 0, left: 0, right: 0 }} />}
       </AppBar>
+      <Snackbar
+        open={message !== null}
+        message={message}
+        autoHideDuration={5000}
+        onClose={() => setMessage(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      />
       <Container maxWidth="xl" sx={{ py: 3 }}>
         <Box component="main">{children}</Box>
       </Container>

@@ -66,7 +66,7 @@ function addCall(db: DatabaseSync, id: number, agentId: string | null, seconds: 
   );
 }
 
-test('syncUsage copies calls incrementally and flags idle rewrites per agent', () => {
+test('syncUsage rolls calls into 5-minute buckets incrementally and records idle rewrites per agent', () => {
   const sourceFile = path.join(dir, 'source.db');
   const source = createSource(sourceFile);
   addCall(source, 1, null, 0);
@@ -78,22 +78,31 @@ test('syncUsage copies calls incrementally and flags idle rewrites per agent', (
   assert.equal(syncUsage(store, sourceFile).newCalls, 3);
   assert.equal(syncUsage(store, sourceFile).newCalls, 0);
 
-  // The sub-agent was idle for 600s, but its first call has no previous call to measure a gap from.
+  // The sub-agent's gap is measured from its call in the earlier sync. Call 5 lands in the same
+  // bucket as call 4 but arrives in a later sync, so the bucket must be added to, not replaced.
   const more = new DatabaseSync(sourceFile);
   addCall(more, 4, 'agent-a', 630, true);
+  assert.equal(syncUsage(store, sourceFile).newCalls, 1);
   addCall(more, 5, 'agent-a', 700, true);
   more.close();
-  assert.equal(syncUsage(store, sourceFile).newCalls, 2);
+  assert.equal(syncUsage(store, sourceFile).newCalls, 1);
 
-  const flags = store.prepare('SELECT id, gap_s, idle_rewrite FROM calls ORDER BY id').all();
+  const rewrites = store.prepare('SELECT id, gap_s FROM rewrites ORDER BY id').all();
   assert.deepEqual(
-    flags.map((row) => [row.id, row.gap_s, row.idle_rewrite]),
+    rewrites.map((row) => [row.id, row.gap_s]),
     [
-      [1, null, 0],
-      [2, null, 0],
-      [3, 400, 1],
-      [4, 600, 1],
-      [5, 70, 0],
+      [3, 400],
+      [4, 600],
+    ],
+  );
+  const usage = store.prepare('SELECT agent_id, (bucket - ?) / 1000 AS s, calls, rewrites FROM usage ORDER BY bucket, agent_id').all(T0);
+  assert.deepEqual(
+    usage.map((row) => [row.agent_id, row.s, row.calls, row.rewrites]),
+    [
+      ['', 0, 1, 0],
+      ['agent-a', 0, 1, 0],
+      ['', 300, 1, 1],
+      ['agent-a', 600, 2, 1],
     ],
   );
 
@@ -102,10 +111,12 @@ test('syncUsage copies calls incrementally and flags idle rewrites per agent', (
   assert.equal(totals.calls, 5);
   assert.equal(totals.rewrites, 2);
   assert.equal(totals.aicTotal, (2 * 50_000_000 + 3 * 500_000_000 + 5 * 5_000_000) / 1e9);
+  assert.equal(totals.rewriteAic, 2 * 505_000_000 / 1e9);
 
   const detail = getSessionDetail(store, SESSION);
   assert.equal(detail?.session.project, 'demo');
-  assert.equal(detail?.calls.length, 5);
+  assert.equal(detail?.session.lastTs, T0 + 700_000);
+  assert.deepEqual(detail?.rewrites.map((r) => r.id), [3, 4]);
   assert.deepEqual(detail?.agents.map((agent) => [agent.agentId, agent.calls]).sort(), [
     ['', 2],
     ['agent-a', 3],

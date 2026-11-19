@@ -1,7 +1,8 @@
 import { TOKEN_TYPES } from './cost.ts';
-import type { ByType, CallRow } from './types.ts';
+import type { ByType, UsageSlice } from './types.ts';
 
-const STEPS_MINUTES = [1, 5, 15, 30, 60, 180, 360, 1440];
+// The store keeps 5-minute rollups, so 5 minutes is the finest step.
+const STEPS_MINUTES = [5, 15, 30, 60, 180, 360, 1440];
 
 export function pickStepMinutes(spanMs: number, maxBuckets = 160): number {
   return STEPS_MINUTES.find((step) => spanMs / (step * 60_000) <= maxBuckets) ?? 1440;
@@ -22,7 +23,7 @@ export function floorToStep(ms: number, stepMinutes: number): number {
   return d.getTime();
 }
 
-function nextStep(ms: number, stepMinutes: number): number {
+export function nextStep(ms: number, stepMinutes: number): number {
   const d = new Date(ms);
   if (stepMinutes >= 1440) d.setDate(d.getDate() + stepMinutes / 1440);
   else d.setMinutes(d.getMinutes() + stepMinutes);
@@ -42,31 +43,36 @@ export interface SessionBuckets {
   cumulativeAic: number[];
 }
 
-export function bucketCalls(calls: CallRow[], stepMinutes?: number): SessionBuckets {
-  if (calls.length === 0) return { stepMinutes: 1, starts: [], aic: [], tokens: [], rewriteAic: [], cumulativeAic: [] };
-  const firstTs = calls[0].ts;
-  const lastTs = calls[calls.length - 1].ts;
-  const step = stepMinutes ?? pickStepMinutes(lastTs - firstTs);
-
+// Step starts from the step that contains fromMs up to, but not including, toMs.
+export function stepRange(fromMs: number, toMs: number, stepMinutes: number): number[] {
   const starts: number[] = [];
-  const end = floorToStep(lastTs, step);
-  for (let ms = floorToStep(firstTs, step); ms <= end; ms = nextStep(ms, step)) {
+  for (let ms = floorToStep(fromMs, stepMinutes); ms < toMs; ms = nextStep(ms, stepMinutes)) {
     if (starts.length > 0 && ms <= starts[starts.length - 1]) break;
     starts.push(ms);
   }
+  return starts;
+}
+
+export function bucketSlices(slices: UsageSlice[], stepMinutes?: number): SessionBuckets {
+  if (slices.length === 0) return { stepMinutes: 5, starts: [], aic: [], tokens: [], rewriteAic: [], cumulativeAic: [] };
+  const firstTs = Math.min(...slices.map((s) => s.ts));
+  const lastTs = Math.max(...slices.map((s) => s.ts));
+  const step = stepMinutes ?? pickStepMinutes(lastTs - firstTs);
+
+  const starts = stepRange(firstTs, lastTs + 1, step);
   const index = new Map(starts.map((ms, i) => [ms, i]));
   const aic = starts.map(zero);
   const tokens = starts.map(zero);
   const rewriteAic = starts.map(() => 0);
 
-  for (const call of calls) {
-    const i = index.get(floorToStep(call.ts, step));
+  for (const slice of slices) {
+    const i = index.get(floorToStep(slice.ts, step));
     if (i === undefined) continue;
     for (const type of TOKEN_TYPES) {
-      aic[i][type] += call.aic[type];
-      tokens[i][type] += call.tokens[type];
+      aic[i][type] += slice.aic[type];
+      tokens[i][type] += slice.tokens[type];
     }
-    if (call.idleRewrite) rewriteAic[i] += call.aicTotal;
+    rewriteAic[i] += slice.rewriteAic;
   }
 
   let running = 0;
