@@ -19,6 +19,16 @@ Each page load syncs new usage from the Copilot store, at most once every 10 sec
 
 Other scripts: `npm test`, `npm run lint`, `npm run typecheck`, `npm run build` and `npm start`.
 
+### Docker
+
+```sh
+docker compose up -d --build    # http://localhost:4817
+```
+
+Compose mounts `~/.copilot` read-only at `/copilot` and keeps the app's store in the `muh-tokens-data` volume. Set `COPILOT_DIR` to mount a different Copilot folder. The port is bound to 127.0.0.1 only.
+
+The mount must stay read-only. The Copilot database uses WAL mode, and SQLite's WAL index is shared memory, which is not kept consistent between the host and a container VM. A read-only mount stops the container from writing to it. `npm run sync` is not available in the image; page loads sync instead.
+
 ## Data
 
 The app reads two sources:

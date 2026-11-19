@@ -1,0 +1,14 @@
+services:
+  muh-tokens:
+    build: .
+    image: muh-tokens
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4817:4817"
+    volumes:
+      # Read-only, so the container never writes to the live Copilot database or its WAL files.
+      - ${COPILOT_DIR:-~/.copilot}:/copilot:ro
+      - muh-tokens-data:/data
+
+volumes:
+  muh-tokens-data:
