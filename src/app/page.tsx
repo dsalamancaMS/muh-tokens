@@ -24,7 +24,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       <FiltersBar filters={filters} projects={projects} models={models} sync={getSyncStatus()} showBucket />
       <KpiCards totals={totals} />
       <TimelineChart timeline={timelines.bars} filters={filters} />
-      <TimeChart timeline={timelines.time} filters={filters} />
+      <TimeChart timeline={timelines.time} filters={filters} variant="stack" />
+      <TimeChart timeline={timelines.projects} filters={filters} variant="project" />
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, xl: 5 }}>
           <TypeBreakdown totals={totals} />

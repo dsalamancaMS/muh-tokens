@@ -2,7 +2,7 @@
 
 A local web app that shows GitHub Copilot CLI token and AI credit (AIC) usage over time. It reads the session store that Copilot CLI writes on your machine and nothing else.
 
-- The dashboard shows totals, a stacked timeline of AIC or tokens, the split by token type, the top sessions, and breakdowns by model, project and agent. The timeline can be stacked by token type, session, model, project or agent. Below it, a time chart shows the same series on a continuous time axis at a finer step, as lines, a stacked area or a running total. When either chart is stacked by session, clicking a series opens that session.
+- The dashboard shows totals, a stacked timeline of AIC or tokens, the split by token type, the top sessions, and breakdowns by model, project and agent. The timeline can be stacked by token type, session, model, project or agent. Below it, a time chart shows the same series on a continuous time axis at a finer step, as lines, a stacked area or a running total. When either chart is stacked by session, clicking a series opens that session. A third chart always shows one line per project, for the 8 largest projects in the range plus Other, with its own AIC or tokens toggle and the same three views.
 - The sessions page lists every session in the selected range with its AIC, tokens, calls and per-type split.
 - The session page shows one session: a timeline of AIC or tokens by type with a running AIC total, the largest context per agent in each 5-minute period, the sub-agents, and the most expensive idle cache rewrites.
 

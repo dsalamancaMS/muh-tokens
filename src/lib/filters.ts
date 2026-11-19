@@ -22,6 +22,8 @@ export interface Filters {
   stack: Stack;
   metric: Metric;
   chart: Chart;
+  projectMetric: Metric;
+  projectChart: Chart;
 }
 
 export type SearchParams = Record<string, string | string[] | undefined>;
@@ -94,6 +96,8 @@ export function parseFilters(params: SearchParams, now: number, earliestMs: numb
     stack: oneOf(first(params.stack), STACKS, 'type'),
     metric: oneOf(first(params.metric), METRICS, 'aic'),
     chart: oneOf(first(params.chart), CHARTS, 'line'),
+    projectMetric: oneOf(first(params.pmetric), METRICS, 'aic'),
+    projectChart: oneOf(first(params.pchart), CHARTS, 'line'),
   };
 }
 
@@ -133,5 +137,7 @@ export function filtersToParams(filters: Partial<Filters>): URLSearchParams {
   if (filters.stack && filters.stack !== 'type') params.set('stack', filters.stack);
   if (filters.metric && filters.metric !== 'aic') params.set('metric', filters.metric);
   if (filters.chart && filters.chart !== 'line') params.set('chart', filters.chart);
+  if (filters.projectMetric && filters.projectMetric !== 'aic') params.set('pmetric', filters.projectMetric);
+  if (filters.projectChart && filters.projectChart !== 'line') params.set('pchart', filters.projectChart);
   return params;
 }

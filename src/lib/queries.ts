@@ -204,16 +204,24 @@ function aggregate(source: StackRows, buckets: number[], bucketMinutes: number, 
 const BUCKET_MINUTES = { hour: 60, day: 1440, week: 10080 };
 const TIME_CHART_POINTS = 200;
 
-// The bar chart uses the hour, day or week buckets from the filters. The time chart uses the finest step
-// that keeps the range under TIME_CHART_POINTS points.
-export function getTimelines(db: DatabaseSync, filters: Filters): { bars: Timeline; time: Timeline } {
+// The bar chart uses the hour, day or week buckets from the filters. The time charts use the finest step
+// that keeps the range under TIME_CHART_POINTS points. The project chart always has one series per project
+// and its own metric.
+export function getTimelines(db: DatabaseSync, filters: Filters): { bars: Timeline; time: Timeline; projects: Timeline } {
   const source = stackRows(db, filters);
   const step = pickStepMinutes(filters.toMs - filters.fromMs, TIME_CHART_POINTS);
+  const steps = stepRange(filters.fromMs, filters.toMs, step);
+  const floor = (ms: number) => floorToStep(ms, step);
+  const projectSource =
+    filters.stack === 'project' && filters.metric === filters.projectMetric
+      ? source
+      : stackRows(db, { ...filters, stack: 'project', metric: filters.projectMetric });
   return {
     bars: aggregate(source, bucketRange(filters.fromMs, filters.toMs, filters.bucket), BUCKET_MINUTES[filters.bucket], (ms) =>
       bucketStart(ms, filters.bucket),
     ),
-    time: aggregate(source, stepRange(filters.fromMs, filters.toMs, step), step, (ms) => floorToStep(ms, step)),
+    time: aggregate(source, steps, step, floor),
+    projects: aggregate(projectSource, steps, step, floor),
   };
 }
 

@@ -25,9 +25,13 @@ test('parseFilters treats a custom "to" date as inclusive and rejects reversed r
 });
 
 test('filtersToParams writes only the values that differ from the defaults', () => {
-  const filters = parseFilters({ range: '30d', stack: 'model', metric: 'tokens', project: 'AKSpider' }, now, 0);
+  const filters = parseFilters(
+    { range: '30d', stack: 'model', metric: 'tokens', project: 'AKSpider', pmetric: 'tokens', pchart: 'cumulative', chart: 'bogus' },
+    now,
+    0,
+  );
   const params = filtersToParams(filters);
-  assert.equal(params.toString(), 'range=30d&project=AKSpider&stack=model&metric=tokens');
+  assert.equal(params.toString(), 'range=30d&project=AKSpider&stack=model&metric=tokens&pmetric=tokens&pchart=cumulative');
   assert.equal(filtersToParams(parseFilters({}, now, 0)).toString(), '');
 });
 
