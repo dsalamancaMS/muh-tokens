@@ -12,7 +12,7 @@ Requires Node 24 or later, because it uses `node:sqlite`.
 
 ```sh
 npm install
-npm run dev        # http://localhost:3000
+npm run dev        # http://localhost:4817
 ```
 
 Each page load syncs new usage from the Copilot store, at most once every 10 seconds. To sync without starting the server, run `npm run sync`.
